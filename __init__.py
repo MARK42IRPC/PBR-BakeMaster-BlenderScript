@@ -24,9 +24,12 @@ def register():
     operators.register()
     panels.register()
     categories.register()
+    bpy.app.handlers.depsgraph_update_post.append(tree._auto_populate_handler)
 
 
 def unregister():
+    if tree._auto_populate_handler in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(tree._auto_populate_handler)
     categories.unregister()
     panels.unregister()
     operators.unregister()

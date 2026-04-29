@@ -639,15 +639,17 @@ def _post_math(img, params):
     operation = params.get('operation', 'MULTIPLY')
     arr = _img_to_numpy(img)
 
-    # 计算亮度（仅 RGB 通道）
+    # BT.709 线性亮度 — 像素数据为 float_buffer 存储的线性值，无需色彩空间转换
     lum = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
 
     if operation == 'NORMALIZE':
         lmin, lmax = lum.min(), lum.max()
-        if abs(lmax - lmin) < 0.0001:
+        rng = lmax - lmin
+        if rng < 0.0001:
             lum.fill(0.5)
         else:
-            lum = (lum - lmin) / (lmax - lmin)
+            np.subtract(lum, lmin, out=lum)
+            np.divide(lum, rng, out=lum)
     elif operation == 'MULTIPLY':
         lum *= params.get('factor', 1.0)
     elif operation == 'ADD':
@@ -655,24 +657,28 @@ def _post_math(img, params):
     elif operation == 'SUBTRACT':
         lum -= params.get('factor', 0.0)
     elif operation == 'POWER':
-        lum = np.power(lum, max(0.001, params.get('factor', 1.0)))
+        np.power(lum, params.get('factor', 1.0), out=lum)
     elif operation == 'GREATER_THAN':
-        lum = (lum > params.get('threshold', 0.5)).astype(np.float32)
+        lum[:] = lum > params.get('threshold', 0.5)
     elif operation == 'LESS_THAN':
-        lum = (lum < params.get('threshold', 0.5)).astype(np.float32)
+        lum[:] = lum < params.get('threshold', 0.5)
     elif operation == 'CLAMP':
-        lum = np.clip(lum, params.get('clamp_min', 0.0), params.get('clamp_max', 1.0))
+        lo = params.get('clamp_min', 0.0)
+        hi = params.get('clamp_max', 1.0)
+        np.clip(lum, min(lo, hi), max(lo, hi), out=lum)
     elif operation == 'MAP_RANGE':
         src_min = params.get('clamp_min', 0.0)
         src_max = params.get('clamp_max', 1.0)
-        if abs(src_max - src_min) < 0.0001:
+        rng = src_max - src_min
+        if abs(rng) < 0.0001:
             lum.fill(0.0)
         else:
-            lum = (lum - src_min) / (src_max - src_min)
+            np.subtract(lum, src_min, out=lum)
+            np.divide(lum, rng, out=lum)
     elif operation == 'INVERT':
-        lum = 1.0 - lum
+        np.subtract(1.0, lum, out=lum)
 
-    lum = np.clip(lum, 0.0, 1.0)
+    np.clip(lum, 0.0, 1.0, out=lum)
     arr[:, :, 0] = lum
     arr[:, :, 1] = lum
     arr[:, :, 2] = lum

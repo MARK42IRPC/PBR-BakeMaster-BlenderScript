@@ -2,48 +2,11 @@ import bpy
 import numpy as np
 import os
 
+from .png_writer import write_png_direct
 from .task import BakeTask, CompositeTask
 
 # 模块级烘焙缓存：同一 BakeChannel 节点 + 分辨率只烘焙一次
 _BAKE_CACHE = {}
-
-import struct
-import zlib
-
-
-def _write_png_direct(pixels_float, width, height, filepath, depth_str):
-    """直接写 PNG 文件，完全绕过 Blender 的 float→byte 转换管道。
-    Blender 的 img.save() 会对 float_buffer 图像做 alpha 预乘/反预乘处理，
-    导致低 Alpha 像素的 RGB 被破坏（除以 Alpha 后 clamp 到 1.0）。
-    此函数直接将浮点数组写入 16/8-bit PNG，不做任何色彩/Aplha 变换。"""
-    bit_depth = 16 if depth_str == '16' else 8
-    max_val = 65535 if bit_depth == 16 else 255
-
-    # 将 float [0,1] 转为整数，逐行写入（含 PNG filter byte）
-    raw_rows = bytearray()
-    for y in range(height):
-        raw_rows.append(0)  # filter: None
-        row_start = y * width * 4
-        for x in range(width):
-            i = row_start + x * 4
-            for c in range(4):
-                v = int(round(max(0.0, min(1.0, pixels_float[i + c])) * max_val))
-                if bit_depth == 16:
-                    raw_rows.extend(struct.pack('>H', v))
-                else:
-                    raw_rows.append(v)
-
-    def _png_chunk(ct, data):
-        chunk = ct + data
-        return struct.pack('>I', len(data)) + chunk + struct.pack('>I', zlib.crc32(chunk) & 0xffffffff)
-
-    ihdr = struct.pack('>IIBBBBB', width, height, bit_depth, 6, 0, 0, 0)  # color_type=6 RGBA
-    png = b'\x89PNG\r\n\x1a\n' + _png_chunk(b'IHDR', ihdr)
-    png += _png_chunk(b'IDAT', zlib.compress(bytes(raw_rows)))
-    png += _png_chunk(b'IEND', b'')
-
-    with open(filepath, 'wb') as f:
-        f.write(png)  # cache_key → img (Blender Image)，img_node 在首次清理时已销毁
 
 def clear_bake_cache():
     """清除所有缓存的烘焙图像（在所有任务完成后调用）"""
@@ -349,7 +312,7 @@ def _save_composite_image(img, composite, bake_type=None):
 
     if composite.file_format == 'PNG':
         # 直接写 PNG，绕过 Blender 的 float→byte 转换（会做 alpha 预乘/反预乘）
-        _write_png_direct(pre_save_all, img.size[0], img.size[1], composite.output_path, composite.color_depth)
+        write_png_direct(pre_save_all, img.size[0], img.size[1], composite.output_path, composite.color_depth)
     else:
         img.save(filepath=composite.output_path)
     print(f"[BakeWrangler] 合成图像已保存到: {composite.output_path}")
